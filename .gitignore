@@ -6,7 +6,6 @@
 .*.swp
 *.pyc
 tags
-/bin
 /src
 /pkg
 err-*log
