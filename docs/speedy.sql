@@ -30,7 +30,7 @@ CREATE TABLE `chunkserver` (
   `total_chunks` int(10) unsigned NOT NULL COMMENT 'total chunks',
   `conn_counts` int(10) unsigned NOT NULL COMMENT 'connection count',
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT '0:undeleted, 1:deleted',
-  `create_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT 'created time',
+  `create_time` timestamp NOT NULL DEFAULT '2017-01-01 12:12:12' COMMENT 'created time',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'upated time',
   PRIMARY KEY (`chunkserver_id`),
   UNIQUE KEY `addr` (`ip`,`port`)
@@ -44,7 +44,7 @@ CREATE TABLE `chunkserver` (
 DROP TABLE IF EXISTS `gen_fid`;
 CREATE TABLE `gen_fid` (
   `fid` bigint(20) unsigned NOT NULL COMMENT 'fid',
-  `create_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT 'created time',
+  `create_time` timestamp NOT NULL DEFAULT '2017-01-01 12:12:12' COMMENT 'created time',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -73,7 +73,7 @@ CREATE TABLE `key_list` (
   `list_key` varchar(255) DEFAULT NULL,
   `md5_key` char(32) DEFAULT NULL,
   `list_value` varchar(255) DEFAULT NULL,
-  `create_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',
+  `create_time` timestamp NOT NULL DEFAULT '2017-01-01 12:12:12',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `md5_key` (`md5_key`)
