@@ -78,3 +78,15 @@ CREATE TABLE `key_list` (
   PRIMARY KEY (`id`),
   KEY `md5_key` (`md5_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Table structure for table `index_list`
+--
+
+DROP TABLE IF EXISTS `index_list`;
+CREATE TABLE `index_list` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `index_md5` char(32) DEFAULT NULL,
+  `list_key` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;

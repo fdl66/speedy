@@ -2,6 +2,7 @@ package mysqldriver
 
 import (
 	"fmt"
+	. "github.com/jcloudpub/speedy/imageserver/meta/mysqldriver"
 	. "github.com/jcloudpub/speedy/imageserver/meta"
 	"sync"
 	"testing"
@@ -11,7 +12,7 @@ import (
 var metaDriver MetaDriver
 
 func init() {
-	InitMeta("127.0.0.1", 3306, "root", "", "metadb")
+	InitMeta("127.0.0.1", 3306, "root", "123456", "metadb")
 	metaDriver = new(MysqlDriver)
 }
 
@@ -28,7 +29,7 @@ func TestStoreMetaInfo(t *testing.T) {
 	metadata.Path = "first6"
 	metadata.Value = metaInfoValue
 	t.Log(metaInfoValue.End)
-	err := metaDriver.StoreMetaInfo(metadata)
+	err := metaDriver.StoreMetaInfoV1(metadata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestStoreMetaInfoPrefomance(t *testing.T) {
 
 				metadata.Path = fmt.Sprintf("test%v-%v", b, j)
 				metadata.Value = metaInfoValue
-				err := metaDriver.StoreMetaInfo(metadata)
+				err := metaDriver.StoreMetaInfoV1(metadata)
 				if err != nil {
 					t.Fatal(err)
 				}
