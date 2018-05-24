@@ -20,7 +20,7 @@ func main() {
 	var metaHost = flag.String("dh", "127.0.0.1", "database ip")
 	var metaPort = flag.String("dp", "3306", "database port")
 	var user = flag.String("u", "root", "database user")
-	var passwd = flag.String("pw", "", "database passwd")
+	var passwd = flag.String("pw", "123456", "database passwd")
 	var db = flag.String("d", "speedy", "database name")
 	var debug = flag.Bool("D", false, "log debug level")
 

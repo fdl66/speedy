@@ -24,6 +24,7 @@ const (
 	headerDestPath    = "Dest-Path"
 	headerPath        = "Path"
 	headerIndex       = "Fragment-Index"
+	Index             = "Index"
 	headerRange       = "Bytes-Range"
 	headerIsLast      = "Is-Last"
 	headerVersion     = "Registry-Version"
@@ -31,6 +32,7 @@ const (
 	SUCCESS           = ""
 	VERSION1          = "v1"
 	VERSION2          = "v2"
+	Chunkdedup        = "Chunkdedup"
 )
 
 type Server struct {
@@ -75,20 +77,21 @@ func NewServer(masterUrl, ip string, port int, num int, metadbIp string, metadbP
 
 func (s *Server) initApi() {
 	m := map[string]map[string]http.HandlerFunc{
-		"GET": {
-			"/v1/fileinfo":        s.getFileInfo,
-			"/v1/file":            s.downloadFile,
-			"/v1/list_directory":  s.getDirectoryInfo,
-			"/v1/list_descendant": s.getDescendant,
-		},
-		"POST": {
-			"/v1/file":  s.uploadFile,
-			"/v1/_ping": s.ping,
-			"/v1/move":  s.moveFile,
-		},
-		"DELETE": {
-			"/v1/file": s.deleteFile,
-		},
+	"GET": {
+		"/v1/fileinfo":        s.getFileInfo,
+		"/v1/fileindex":       s.getFileIndex,
+		"/v1/file":            s.downloadFile,
+		"/v1/list_directory":  s.getDirectoryInfo,
+		"/v1/list_descendant": s.getDescendant,
+	},
+	"POST": {
+		"/v1/file":  s.uploadFile,
+		"/v1/_ping": s.ping,
+		"/v1/move":  s.moveFile,
+	},
+	"DELETE": {
+		"/v1/file": s.deleteFile,
+	},
 	}
 
 	s.router = mux.NewRouter()
@@ -112,17 +115,24 @@ func (s *Server) responseResult(data []byte, statusCode int, err error, w http.R
 	w.Write(data)
 }
 
-func (s *Server) uploadFileReadParam(header *http.Header) (*meta.MetaInfo, string, error) {
+func (s *Server) uploadFileReadParam(header *http.Header) (*meta.MetaInfo, string, []uint64, error) {
 	path := header.Get(headerPath)
 	fragmentIndex := header.Get(headerIndex)
 	bytesRange := header.Get(headerRange)
+	index_md5 := header.Get(Index)
 	isLast := header.Get(headerIsLast)
-	version := header.Get(headerVersion)
 
+	version := header.Get(headerVersion)
+	chunkdedup := header.Get(Chunkdedup)
+
+	chunkdedup_id := []uint64{0,0}
+	if chunkdedup != "" {
+		json.Unmarshal([]byte(chunkdedup),&chunkdedup_id)
+	}
 	start, end, err := s.splitRange(bytesRange)
 	if err != nil {
 		log.Errorf("splitRange error: %s", err)
-		return nil, version, err
+		return nil, version, chunkdedup_id, err
 	}
 
 	last := false
@@ -133,7 +143,7 @@ func (s *Server) uploadFileReadParam(header *http.Header) (*meta.MetaInfo, strin
 	index, err := strconv.ParseUint(fragmentIndex, 10, 64)
 	if err != nil {
 		log.Errorf("parse fragmentIndex error: %s", err)
-		return nil, version, err
+		return nil, version, chunkdedup_id, err
 	}
 
 	log.Infof("[uploadFileReadParam] path: %s, fragmentIndex: %d, bytesRange: %d-%d, isLast: %v", path, index, start, end, last)
@@ -142,10 +152,11 @@ func (s *Server) uploadFileReadParam(header *http.Header) (*meta.MetaInfo, strin
 		Index:  index,
 		Start:  start,
 		End:    end,
+		Index_md5: index_md5,
 		IsLast: last,
 	}
 	metaInfo := &meta.MetaInfo{Path: path, Value: metaInfoValue}
-	return metaInfo, version, nil
+	return metaInfo, version, chunkdedup_id, nil
 }
 
 func (s *Server) upload(data []byte, metaInfo *meta.MetaInfo) (int, error) {
@@ -202,25 +213,40 @@ func (s *Server) upload(data []byte, metaInfo *meta.MetaInfo) (int, error) {
 
 //store metainfo function is special for docker registry v1
 func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
-	metaInfo, version, err := s.uploadFileReadParam(&r.Header)
+	metaInfo, version, chunkdedup_id, err := s.uploadFileReadParam(&r.Header)
 	if err != nil {
 		log.Errorf("[uploadFile] read param error: %v", err)
 		s.responseResult(nil, http.StatusBadRequest, err, w)
 		return
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Errorf("read request body error: %s", err)
-		s.responseResult(nil, http.StatusBadRequest, err, w)
-		return
-	}
+	if chunkdedup_id[0] != 0{
+		data, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			log.Errorf("read request body error: %s", err)
+			s.responseResult(nil, http.StatusBadRequest, err, w)
+			return
+		}
 
-	statusCode, err := s.upload(data, metaInfo)
-	if err != nil {
-		log.Errorf("[uploadFile] upload error: %v", err)
-		s.responseResult(nil, statusCode, err, w)
-		return
+		statusCode, err := s.upload(data, metaInfo)
+		if err != nil {
+			log.Errorf("[uploadFile] upload error: %v", err)
+			s.responseResult(nil, statusCode, err, w)
+			return
+		}
+
+		// 存储文件索引
+		if metaInfo.Value.Index == 0 {
+			indexInfo := &meta.IndexInfo{
+				Path:metaInfo.Path,
+				Index_md5:metaInfo.Value.Index_md5,
+			}
+			err = s.metaDriver.StoreIndexInfo(indexInfo)
+		}
+	} else{
+		// 存在重复的块，只存储索引，不存数据
+		metaInfo.Value.FileId = chunkdedup_id[1]
+		metaInfo.Value.GroupId = uint16(chunkdedup_id[0])
 	}
 
 	if version == VERSION1 {
@@ -268,6 +294,39 @@ func (s *Server) getFileInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Infof("[getFileInfo] success, path: %s, result: %s", path, string(jsonResult))
+
+	s.responseResult(jsonResult, http.StatusOK, nil, w)
+}
+
+func (s *Server) getFileIndex(w http.ResponseWriter, r *http.Request) {
+	index := r.Header.Get(Index)
+
+	log.Infof("[getFileIndex] index: %s", index)
+
+	result, err := s.metaDriver.GetFileIndexInfo(index, true)
+
+	if err != nil {
+		log.Errorf("[getFileIndex] get indexinfo error, key: %s, error: %s", index, err)
+		s.responseResult(nil, http.StatusInternalServerError, err, w)
+		return
+	}
+
+	if len(result) == 0 {
+		log.Infof("[getFileIndex] getFileIndex not exists, key: %s", index)
+		s.responseResult(nil, http.StatusNotFound, err, w)
+		return
+	}
+
+	resultMap := make(map[string]interface{})
+	resultMap["fragment-info"] = result
+	jsonResult, err := json.Marshal(resultMap)
+	if err != nil {
+		log.Errorf("json.Marshal error, index_md5: %s, error: %s", index, err)
+		s.responseResult(nil, http.StatusInternalServerError, err, w)
+		return
+	}
+
+	log.Infof("[getFileIndex] success, index_md5: %s, result: %s", index, string(jsonResult))
 
 	s.responseResult(jsonResult, http.StatusOK, nil, w)
 }

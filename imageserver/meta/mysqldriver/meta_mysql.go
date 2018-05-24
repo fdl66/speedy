@@ -41,6 +41,15 @@ func InitMeta(metadbIp string, metadbPort int, metadbUser, metadbPassword, metaD
 	return nil
 }
 
+func (db *MysqlDriver) StoreIndexInfo(indexInfo *IndexInfo) error {
+	err := pushIndex( mysqlDB, indexInfo.Path, indexInfo.Index_md5)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (db *MysqlDriver) StoreMetaInfoV1(metaInfo *MetaInfo) error {
 	if metaInfo.Value.IsLast && metaInfo.Value.Index == 0 {
 		err := db.DeleteFileMetaInfoV1(metaInfo.Path)
@@ -221,6 +230,46 @@ func (db *MysqlDriver) GetFileMetaInfo(path string, detail bool) ([]*MetaInfoVal
 	return metaInfoValues, nil
 }
 
+func (db *MysqlDriver) GetFileIndexInfo(index string, detail bool) ([]*MetaInfoValue, error) {
+	list, err := getPath(mysqlDB, index)
+	if err != nil {
+		return nil, err
+	}
+
+	metaInfoValues := make([]*MetaInfoValue, 0)
+	for _, path := range list{
+		chunk_list, timeArr, err := getList(mysqlDB, path)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, bts := range chunk_list {
+			var jsonMap map[string]interface{}
+			err := json.Unmarshal([]byte(bts), &jsonMap)
+			if err != nil {
+				return nil, err
+			}
+
+			metaInfoValue := new(MetaInfoValue)
+			metaInfoValue.Index = uint64(jsonMap["Index"].(float64))
+			metaInfoValue.Start = uint64(jsonMap["Start"].(float64))
+			metaInfoValue.End = uint64(jsonMap["End"].(float64))
+			metaInfoValue.IsLast = jsonMap["IsLast"].(bool)
+			metaInfoValue.ModTime = timeArr[i]
+			metaInfoValue.Index_md5 = jsonMap["Index_md5"].(string)
+
+			if detail {
+				metaInfoValue.FileId = uint64(jsonMap["FileId"].(float64))
+				metaInfoValue.GroupId = uint16(jsonMap["GroupId"].(float64))
+			}
+
+			metaInfoValues = append(metaInfoValues, metaInfoValue)
+		}
+	}
+
+	return metaInfoValues, nil
+}
+
 func (db *MysqlDriver) GetFragmentMetaInfo(path string, index, start, end uint64) (*MetaInfoValue, error) {
 	metaInfoValues, err := db.GetFileMetaInfo(path, true)
 	if err != nil {
@@ -273,6 +322,21 @@ func pushList(db *sql.DB, key, value string) error {
 	defer stmt.Close()
 
 	_, err = stmt.Exec(key, value, encrypt([]byte(key)))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func pushIndex(db *sql.DB, path string, index_md5 string) error {
+	stmt, err := db.Prepare("INSERT INTO index_list (index_md5, list_key) VALUES (?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(index_md5, path)
 	if err != nil {
 		return err
 	}
@@ -354,6 +418,33 @@ func getList(db *sql.DB, key string) ([]string, []time.Time, error) {
 	}
 
 	return values, timeArr, nil
+}
+
+func getPath(db *sql.DB, index string) ([]string, error) {
+	stmt, err := db.Prepare("SELECT list_key FROM index_list WHERE index_md5 = ?")
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query(index)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var values = make([]string, 0)
+
+	for rows.Next() {
+		var value string
+		err = rows.Scan(&value)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+
+	return values, nil
 }
 
 func getDescendantPath(db *sql.DB, key string) ([]string, error) {

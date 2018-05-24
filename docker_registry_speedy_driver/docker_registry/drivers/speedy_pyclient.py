@@ -5,6 +5,7 @@ import random
 import operator
 import threading
 import logging
+import json
 from docker_registry.core import exceptions
 
 global AllUrls
@@ -130,6 +131,45 @@ class Connection(object):
             logger.error("Unkown stauts code: %d" % resp.status_code)
             raise exceptions.UnspecifiedError("unexcept status code: %d" % resp.status_code)
 
+    def _exists_index(self, index):
+        '''
+        发送get请求查询是否有相同的块,内部函数
+        :param path:
+        :return:
+        '''
+        conn = self._gen_http_conn()
+
+        headers = {}
+        headers["Index"] = index
+
+        return conn.get("v1/fileindex", headers=headers)
+
+    def exists_index(self, index):
+        '''
+        发送get请求查询是否有相同的块,接口函数
+        :param index:
+        :return:
+        '''
+        logger.debug("exists, index: %s" % index)
+
+        resp = self._retry(self._exists_index, index)
+
+        if resp.status_code == 200:
+            j = resp.json()
+
+            key = "fragment-info"
+            if key in j:
+                fragementsinfo = j[key]
+                return fragementsinfo
+            else:
+                raise exceptions.UnspecifiedError("fileinfo not contain fragment-info!")
+
+        elif resp.status_code == 404:
+            return None
+        else:
+            raise exceptions.UnspecifiedError("getfileinfo UnKnow status code:%d"
+                                              % resp.status_code)
+
     def _getfileinfo(self, path):
         conn = self._gen_http_conn()
 
@@ -162,23 +202,31 @@ class Connection(object):
             raise exceptions.UnspecifiedError("getfileinfo UnKnow status code:%d"
                                               % resp.status_code)
 
-    def _upload(self, path, data=None, fragment_index=None, bytes_range=None, is_last=False):
+    def _upload(self, path, data=None, fragment_index=None, bytes_range=None, index_md5=None,
+                is_last=False, chunkdedup=None):
         conn = self._gen_http_conn()
+
+        if chunkdedup:
+            data = None
 
         headers = {}
         headers["Path"] = path
         headers["Fragment-Index"] = str(fragment_index)
         headers["Bytes-Range"] = "%s-%s" % (bytes_range[0], bytes_range[1])
+        headers["Index"] = index_md5
         headers["Is-Last"] = "true" if is_last else "false"
         headers["Registry-Version"] = "v1"
+        headers["Chunkdedup"] = (json.dumps(chunkdedup) if chunkdedup else "")
 
         return conn.post("v1/file", data=data, headers=headers)
 
-    def upload(self, path, data=None, fragment_index=None, bytes_range=None, is_last=False):
+    def upload(self, path, data=None, fragment_index=None, bytes_range=None, index_md5=None,
+               is_last=False, chunkdedup=None):
         logger.debug("upload path: %s, fragment_Index: %d" % (path, fragment_index))
 
         return self._retry(self._upload, path, data=data, fragment_index=fragment_index,
-                           bytes_range=bytes_range, is_last=is_last)
+                           bytes_range=bytes_range, index_md5=index_md5,
+                           is_last=is_last, chunkdedup=chunkdedup)
 
     def _download(self, path, fragment_index, bytes_range, stream=False):
         conn = self._gen_http_conn()

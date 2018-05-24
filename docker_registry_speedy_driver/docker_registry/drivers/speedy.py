@@ -14,6 +14,7 @@ import random
 import string
 import logging
 import time
+import hashlib
 
 from . import speedy_pyclient
 from docker_registry.core import driver
@@ -70,7 +71,7 @@ class _SpeedyMultiPartUploadContext(object):
         finally:
             self._lock.release()
 
-    def _upload_part(self, fragment_index, bytes_range, last_fragment=False):
+    def _upload_part(self, fragment_index, bytes_range, index_md5, last_fragment=False, chunkdedup=None):
         logger.debug("spawn _upload_part, path:%s, index:%d, bytesrange:%d-%d" % \
                      (self.path, fragment_index, bytes_range[0], bytes_range[1]))
 
@@ -79,7 +80,7 @@ class _SpeedyMultiPartUploadContext(object):
 
         try:
             resp = self.conn.upload(self.path, data=f, fragment_index=fragment_index, bytes_range=bytes_range,
-                                    is_last=last_fragment)
+                                    index_md5=index_md5, is_last=last_fragment, chunkdedup=chunkdedup)
 
             if resp.status_code == 200:
                 logger.debug("_upload_part success, path:%s, index: %d" % \
@@ -101,7 +102,7 @@ class _SpeedyMultiPartUploadContext(object):
 
         logger.debug("exit upload_part, path: %s, fragment: %d" % (self.path, fragment_index))
 
-    def push_content(self, buf, more_data=True):
+    def push_content(self, buf, index_md5, more_data=True, chunkdedup=None):
         if len(self.fragment_tmp_file) <= self.cur_fragment:
             self.fragment_tmp_file.append(_TempFile(mode='w+b', prefix=self.tmpdir))
 
@@ -118,7 +119,7 @@ class _SpeedyMultiPartUploadContext(object):
 
             logger.debug("begin spawn upload part, fragment: %d" % self.cur_fragment)
             gevent.spawn(self._upload_part, self.cur_fragment, (self.cur_offset, self.cur_offset + fsize),
-                        not more_data)
+                        not more_data, chunkdedup)
             logger.debug("end spawn upload part, fragment: %d" % self.cur_fragment)
 
             self.cur_offset += fsize
@@ -385,6 +386,16 @@ class Storage(driver.Base):
 
         return self.speedy_conn.exists(path)
 
+    def exists_index(self, index):
+        '''
+        第一块是否相同
+        :param path:
+        :return: True or False
+        '''
+        logger.debug("call exists index: %s" % index)
+
+        return self.speedy_conn.exists_index(index)
+
     def remove(self, path):
         logger.debug("remove path: %s" % path)
 
@@ -425,21 +436,47 @@ class Storage(driver.Base):
             yield buf
 
     def stream_write(self, path, fp):
+        '''
+        已修改，添加检重步骤
+        对比的依据是第一块的hash值相同
+        :param path:
+        :param fp:
+        :return:
+        '''
         speedy_mc = _SpeedyMultiPartUploadContext(path, self.speedy_conn, self.fragment_size, self.tmpdir)
 
         more_data = True
         buf = fp.read(self.buffer_size)
+        dedup = False
+        chunk_dic = []
+        # 初始化file index，用文件第一块hash值表示
+        # 求hash值
+        myhash = hashlib.md5()
+        if buf:
+            myhash.update(buf)
+            cur_index = myhash.hexdigest()
+            chunk_dic = self.exists_index(cur_index)
+            # 存在具有相同index的文件
+            if chunk_dic:
+                dedup = True
         while True:
             if not buf:
                 break
+            # 有重复的块的话对应的id号为chunkdedup
+            chunkdedup = []
+            if dedup :
+                for chunkinfo in chunk_dic:
+                    if chunkinfo["Index_md5"] == myhash.hexdigest():
+                        chunkdedup = [chunkinfo["GroupId"],chunkinfo["FileId"]]
+                # 当前修改到文件上传保存的过程了， 当前的点是，需要添加组id字段，否则无法定位原重复数据块
+                # 存储的位置
             buf_more = fp.read(self.buffer_size)
             if not buf_more:
                 more_data = False
-
-            speedy_mc.push_content(buf, more_data=more_data)
-
+            speedy_mc.push_content(buf, myhash.hexdigest(), more_data=more_data, chunkdedup=chunkdedup)
             buf = buf_more
+            myhash = hashlib.md5()
+            myhash.update(buf)
 
         # wait all part upload completed or failed
         speedy_mc.wait_all_part_complete()
-

@@ -1,0 +1,3 @@
+[console_scripts]
+docker-registry = docker_registry.run:run_gunicorn
+

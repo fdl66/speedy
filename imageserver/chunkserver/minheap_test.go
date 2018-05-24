@@ -2,6 +2,7 @@ package chunkserver
 
 import (
 	"testing"
+	"../chunkserver/minheap.go"
 )
 
 func TestMaxHeadp(t *testing.T) {

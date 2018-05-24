@@ -19,6 +19,7 @@ type MetaInfoValue struct {
 	End     uint64
 	GroupId uint16 `json:",omitempty"`
 	FileId  uint64 `json:",omitempty"`
+	Index_md5 string `json:",omitempty"`
 	IsLast  bool
 	ModTime time.Time `json:",omitempty`
 }
@@ -28,14 +29,22 @@ type MetaInfo struct {
 	Value *MetaInfoValue
 }
 
+type IndexInfo struct{
+	Path string
+	Index_md5 string
+}
+
+
 type MetaDriver interface {
 	StoreMetaInfoV1(metaInfo *MetaInfo) error
 	StoreMetaInfoV2(metaInfo *MetaInfo) error
+	StoreIndexInfo(indexInfo *IndexInfo) error
 	DeleteFileMetaInfoV1(path string) error
 	DeleteFileMetaInfoV2(path string) error
 	GetDirectoryInfo(path string) ([]string, error)
 	GetDescendantPath(path string) ([]string, error)
 	MoveFile(sourcePath, destPath string) error
 	GetFileMetaInfo(path string, detail bool) ([]*MetaInfoValue, error)
+	GetFileIndexInfo(index string, detail bool) ([]*MetaInfoValue, error)
 	GetFragmentMetaInfo(path string, index, start, end uint64) (*MetaInfoValue, error)
 }

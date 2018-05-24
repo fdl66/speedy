@@ -6,7 +6,7 @@
 .*.swp
 *.pyc
 tags
-/bin
 /src
 /pkg
-spy_server
+err-*log
+chunk*chunk
